@@ -1,19 +1,18 @@
 """
 image_source.py
 סדר עדיפות לתמונות:
-  1. תמונות אישיות מ-media/images/ (מועלות ל-Imgur לקבלת URL ציבורי)
+  1. תמונות אישיות מ-GitHub (media/images/)
   2. Pexels API (אם קיים PEXELS_API_KEY)
   3. תמונות ברירת מחדל
 """
 
-import base64
 import os
 import random
 import requests
-from pathlib import Path
 
-MEDIA_DIR = Path(__file__).parent / "media" / "images"
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+GITHUB_REPO = "vcarmel-cell/bowling_bot"
+GITHUB_IMAGES_PATH = "media/images"
+GITHUB_BRANCH = "main"
 
 FALLBACK_IMAGES = [
     "https://images.pexels.com/photos/163452/bowling-game-fun-alley-163452.jpeg?w=1080&h=1080&fit=crop",
@@ -21,35 +20,32 @@ FALLBACK_IMAGES = [
     "https://images.pexels.com/photos/3637795/pexels-photo-3637795.jpeg?w=1080&h=1080&fit=crop",
 ]
 
-
-def _upload_to_imgur(image_path: Path) -> str:
-    """מעלה תמונה מקומית ל-Imgur ומחזיר URL ציבורי."""
-    client_id = os.environ.get("IMGUR_CLIENT_ID", "")
-    if not client_id:
-        raise EnvironmentError("IMGUR_CLIENT_ID לא מוגדר — נדרש להעלאת תמונות מקומיות")
-
-    with open(image_path, "rb") as f:
-        image_data = base64.b64encode(f.read()).decode("utf-8")
-
-    resp = requests.post(
-        "https://api.imgur.com/3/image",
-        headers={"Authorization": f"Client-ID {client_id}"},
-        data={"image": image_data, "type": "base64"},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["data"]["link"]
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
-def _get_local_image_url() -> str | None:
-    """מחזיר URL של תמונה אישית אקראית אם קיימת בתיקייה."""
-    if not MEDIA_DIR.exists():
+def _get_github_image_url() -> str | None:
+    """שולף URL אקראי של תמונה מה-GitHub repo."""
+    api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_IMAGES_PATH}"
+    headers = {"Accept": "application/vnd.github.v3+json"}
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"token {token}"
+
+    resp = requests.get(api_url, headers=headers, timeout=10)
+    if resp.status_code != 200:
         return None
-    images = [f for f in MEDIA_DIR.iterdir() if f.suffix.lower() in IMAGE_EXTENSIONS]
-    if not images:
+
+    files = [
+        f for f in resp.json()
+        if isinstance(f, dict)
+        and any(f.get("name", "").lower().endswith(ext) for ext in IMAGE_EXTENSIONS)
+    ]
+    if not files:
         return None
-    chosen = random.choice(images)
-    return _upload_to_imgur(chosen)
+
+    chosen = random.choice(files)
+    return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_IMAGES_PATH}/{chosen['name']}"
 
 
 def _get_pexels_image_url() -> str | None:
@@ -73,8 +69,8 @@ def _get_pexels_image_url() -> str | None:
 
 
 def get_bowling_image_url() -> str:
-    """מחזיר URL לתמונה — לפי סדר עדיפות: אישית → Pexels → ברירת מחדל."""
-    for source in (_get_local_image_url, _get_pexels_image_url):
+    """מחזיר URL לתמונה — לפי סדר עדיפות: GitHub → Pexels → ברירת מחדל."""
+    for source in (_get_github_image_url, _get_pexels_image_url):
         try:
             url = source()
             if url:
