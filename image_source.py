@@ -1,18 +1,21 @@
 """
 image_source.py
 סדר עדיפות לתמונות:
-  1. תמונות אישיות מ-GitHub (media/images/)
+  1. תמונות אישיות מ-GitHub (media/images/) — עם רוטציה (כל תמונה נבחרת פעם אחת לפני חזרה)
   2. Pexels API (אם קיים PEXELS_API_KEY)
   3. תמונות ברירת מחדל
 """
 
+import json
 import os
 import random
 import requests
+from pathlib import Path
 
 GITHUB_REPO = "vcarmel-cell/bowling_bot"
 GITHUB_IMAGES_PATH = "media/images"
 GITHUB_BRANCH = "main"
+USED_IMAGES_FILE = Path(__file__).parent / "media" / "used_images.json"
 
 FALLBACK_IMAGES = [
     "https://images.pexels.com/photos/163452/bowling-game-fun-alley-163452.jpeg?w=1080&h=1080&fit=crop",
@@ -23,8 +26,32 @@ FALLBACK_IMAGES = [
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
+def _load_used() -> set:
+    if USED_IMAGES_FILE.exists():
+        return set(json.loads(USED_IMAGES_FILE.read_text(encoding="utf-8")))
+    return set()
+
+
+def _save_used(used: set) -> None:
+    USED_IMAGES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    USED_IMAGES_FILE.write_text(json.dumps(sorted(used)), encoding="utf-8")
+
+
+def _pick_unused(names: list[str]) -> str:
+    """בוחר שם תמונה שלא שומשה. כשנגמרות — מאפס ומתחיל סבב חדש."""
+    used = _load_used()
+    available = [n for n in names if n not in used]
+    if not available:
+        used = set()
+        available = names
+    chosen = random.choice(available)
+    used.add(chosen)
+    _save_used(used)
+    return chosen
+
+
 def _get_github_image_url() -> str | None:
-    """שולף URL אקראי של תמונה מה-GitHub repo."""
+    """שולף URL של תמונה לא-משומשת מה-GitHub repo."""
     api_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{GITHUB_IMAGES_PATH}"
     headers = {"Accept": "application/vnd.github.v3+json"}
 
@@ -36,20 +63,19 @@ def _get_github_image_url() -> str | None:
     if resp.status_code != 200:
         return None
 
-    files = [
-        f for f in resp.json()
+    names = [
+        f["name"] for f in resp.json()
         if isinstance(f, dict)
         and any(f.get("name", "").lower().endswith(ext) for ext in IMAGE_EXTENSIONS)
     ]
-    if not files:
+    if not names:
         return None
 
-    chosen = random.choice(files)
-    return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_IMAGES_PATH}/{chosen['name']}"
+    chosen = _pick_unused(names)
+    return f"https://raw.githubusercontent.com/{GITHUB_REPO}/{GITHUB_BRANCH}/{GITHUB_IMAGES_PATH}/{chosen}"
 
 
 def _get_pexels_image_url() -> str | None:
-    """שולף תמונת באולינג אקראית מ-Pexels."""
     api_key = os.environ.get("PEXELS_API_KEY", "")
     if not api_key:
         return None
