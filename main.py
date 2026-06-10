@@ -22,6 +22,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from content_gen import generate_caption
 from image_source import get_bowling_image_url
 from instagram import InstagramAPI
+from video_processor import is_video_url, process_video
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,23 +46,27 @@ def main():
     log.info(f"Starting slot {args.slot} | {datetime.now().strftime('%Y-%m-%d %H:%M')}")
 
     try:
+        log.info("Fetching media...")
+        media_url = get_bowling_image_url()
+        log.info(f"Media URL: {media_url}")
+
+        if is_video_url(media_url):
+            log.info("Video detected — replacing audio with royalty-free music...")
+            media_url = process_video(media_url)
+            log.info(f"Processed video URL: {media_url}")
+
         log.info("Generating caption...")
-        caption = generate_caption(args.slot)
-
-        log.info("Fetching image...")
-        image_url = get_bowling_image_url()
-
-        log.info(f"Image URL: {image_url}")
+        caption = generate_caption(args.slot, media_url)
         log.info(f"Caption:\n{caption}")
 
         if args.dry_run:
             print("\n=== DRY RUN — לא פורסם ===")
-            print(f"תמונה: {image_url}")
+            print(f"מדיה: {media_url}")
             print(f"כיתוב:\n{caption}")
             return
 
         api = InstagramAPI()
-        post_id = api.post(image_url, caption)
+        post_id = api.post(media_url, caption)
         log.info(f"Published successfully! Post ID: {post_id}")
 
     except Exception as e:
