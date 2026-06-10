@@ -26,27 +26,40 @@ FALLBACK_IMAGES = [
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v"}
 
 
-def _load_used() -> set:
+def _load_state() -> dict:
     if USED_IMAGES_FILE.exists():
-        return set(json.loads(USED_IMAGES_FILE.read_text(encoding="utf-8")))
-    return set()
+        try:
+            data = json.loads(USED_IMAGES_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return {"used": data, "last": None}
+            return data
+        except Exception:
+            pass
+    return {"used": [], "last": None}
 
 
-def _save_used(used: set) -> None:
+def _save_state(used: set, last: str | None) -> None:
     USED_IMAGES_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USED_IMAGES_FILE.write_text(json.dumps(sorted(used)), encoding="utf-8")
+    USED_IMAGES_FILE.write_text(
+        json.dumps({"used": sorted(used), "last": last}),
+        encoding="utf-8",
+    )
 
 
 def _pick_unused(names: list[str]) -> str:
-    """בוחר שם תמונה שלא שומשה. כשנגמרות — מאפס ומתחיל סבב חדש."""
-    used = _load_used()
+    """בוחר תמונה שלא שומשה. בסיום סבב — מאפס אך לא חוזר על האחרונה."""
+    state = _load_state()
+    used = set(state["used"])
+    last = state["last"]
+
     available = [n for n in names if n not in used]
     if not available:
         used = set()
-        available = names
+        available = [n for n in names if n != last] or names
+
     chosen = random.choice(available)
     used.add(chosen)
-    _save_used(used)
+    _save_state(used, chosen)
     return chosen
 
 
