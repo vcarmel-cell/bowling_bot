@@ -23,7 +23,7 @@ FALLBACK_IMAGES = [
     "https://images.pexels.com/photos/3637795/pexels-photo-3637795.jpeg?w=1080&h=1080&fit=crop",
 ]
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov", ".m4v"}
 
 
 def _load_used() -> set:
