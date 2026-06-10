@@ -1,6 +1,14 @@
+import base64
 import os
+import subprocess
+import tempfile
+import requests
 import anthropic
 from datetime import datetime
+from pathlib import Path
+
+FFMPEG = r"C:\Users\Next1\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v"}
 
 SYSTEM_PROMPT = """אתה מנהל תוכן מקצועי לחשבון אינסטגרם בנושא באולינג בעברית.
 הפוסטים שלך:
@@ -11,48 +19,100 @@ SYSTEM_PROMPT = """אתה מנהל תוכן מקצועי לחשבון אינסט
 - לא יותר מ-250 מילים — חובה לסיים את הטקסט לפני ה-hashtags"""
 
 PROMPTS = {
-    "tip": """כתוב טיפ מקצועי לשיפור משחק באולינג לפוסט אינסטגרם.
-הטיפ צריך להיות ספציפי, מעשי וניתן ליישום מיד.
-התחל עם שורה פותחת מושכת ואמוג'י מתאים.""",
+    "tip": """המשפט הראשון חייב להתייחס ישירות למה שרואים בתמונה.
+לאחר מכן כתוב טיפ מקצועי לשיפור משחק באולינג — ספציפי, מעשי וניתן ליישום מיד.
+התחל עם ואמוג'י מתאים.""",
 
-    "fact": """כתוב עובדה מפתיעה ומרתקת על ספורט הבאולינג לפוסט אינסטגרם.
-העובדה צריכה להיות ייחודית — משהו שרוב האנשים לא יודעים.
-התחל בשאלה רטורית קצרה כדי לגרום לעניין.""",
+    "fact": """המשפט הראשון חייב להתייחס ישירות למה שרואים בתמונה.
+לאחר מכן כתוב עובדה מפתיעה ומרתקת על ספורט הבאולינג — משהו שרוב האנשים לא יודעים.
+התחל בשאלה רטורית קצרה.""",
 
-    "motivation": """כתוב פוסט מוטיבציה ועידוד הקשורים לבאולינג לאינסטגרם.
-השתמש בקשר בין הספורט לחיים — השאר, התמדה, שיפור עצמי.
-התחל עם ציטוט מחזק או משפט כוח קצר.""",
+    "motivation": """המשפט הראשון חייב להתייחס ישירות למה שרואים בתמונה.
+לאחר מכן כתוב פוסט מוטיבציה ועידוד — השתמש בקשר בין הספורט לחיים.
+התחל עם משפט כוח קצר.""",
 
-    "question": """כתוב שאלה מעוררת אינטראקציה לפוסט אינסטגרם בנושא באולינג.
-השאלה צריכה להיות כיפית, קלה למענה ולגרום לאנשים לתייג חברים.
-הוסף הנחיה לתגובה (לדוגמה: "כתבו בתגובות!" או "תייגו מישהו שאתם אוהבים לשחק איתו!").""",
+    "question": """המשפט הראשון חייב להתייחס ישירות למה שרואים בתמונה.
+לאחר מכן כתוב שאלה כיפית מעוררת אינטראקציה שגורמת לאנשים לתייג חברים.
+הוסף הנחיה לתגובה בסוף.""",
 }
 
 SLOT_TYPES = {
-    0: "tip",        # בוקר
-    1: "fact",       # צהריים
-    2: "motivation", # ערב
+    0: "tip",
+    1: "fact",
+    2: "motivation",
 }
 
 
 def get_content_type(slot: int) -> str:
-    """מחזיר סוג תוכן בהתבסס על slot ויום השנה לגיוון."""
     base_type = SLOT_TYPES.get(slot % 3, "tip")
     types = list(PROMPTS.keys())
     day = datetime.now().timetuple().tm_yday
-    # כל 4 ימים מחליף את סוג התוכן של כל slot לגיוון
     index = (types.index(base_type) + day // 4) % len(types)
     return types[index]
 
 
-def generate_caption(slot: int) -> str:
+def _is_video(url: str) -> bool:
+    return any(url.lower().split("?")[0].endswith(ext) for ext in VIDEO_EXTENSIONS)
+
+
+def _extract_video_thumbnail(video_url: str) -> tuple[str, str]:
+    """מוריד סרטון ומחלץ פריים ראשון כ-JPEG."""
+    tmp_video = Path(tempfile.mktemp(suffix=".mp4"))
+    tmp_thumb = Path(tempfile.mktemp(suffix=".jpg"))
+    try:
+        resp = requests.get(video_url, timeout=60, stream=True)
+        resp.raise_for_status()
+        with open(tmp_video, "wb") as f:
+            for chunk in resp.iter_content(8192):
+                f.write(chunk)
+        subprocess.run(
+            [FFMPEG, "-y", "-i", str(tmp_video), "-vframes", "1", "-q:v", "2", str(tmp_thumb)],
+            check=True, capture_output=True, timeout=30,
+        )
+        data = base64.standard_b64encode(tmp_thumb.read_bytes()).decode("utf-8")
+        return data, "image/jpeg"
+    finally:
+        for p in (tmp_video, tmp_thumb):
+            try: p.unlink()
+            except: pass
+
+
+def _fetch_image_as_base64(url: str) -> tuple[str, str]:
+    """מוריד תמונה (או פריים מסרטון) ומחזיר (base64_data, media_type)."""
+    if _is_video(url):
+        return _extract_video_thumbnail(url)
+    resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
+    media_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0]
+    return base64.standard_b64encode(resp.content).decode("utf-8"), media_type
+
+
+def generate_caption(slot: int, image_url: str) -> str:
     content_type = get_content_type(slot)
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    image_data, media_type = _fetch_image_as_base64(image_url)
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": PROMPTS[content_type]}],
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_data,
+                    },
+                },
+                {
+                    "type": "text",
+                    "text": PROMPTS[content_type],
+                },
+            ],
+        }],
     )
     return response.content[0].text

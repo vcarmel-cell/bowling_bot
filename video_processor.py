@@ -8,6 +8,8 @@ import random
 import subprocess
 import tempfile
 import requests
+import cloudinary
+import cloudinary.uploader
 from pathlib import Path
 
 FFMPEG = r"C:\Users\Next1\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1.1-full_build\bin\ffmpeg.exe"
@@ -33,20 +35,19 @@ def _download(url: str, suffix: str) -> Path:
     return Path(tmp.name)
 
 
-def _upload_to_fileio(file_path: Path) -> str:
-    """מעלה קובץ ל-file.io ומחזיר URL ציבורי (חד-פעמי, תקף 14 יום)."""
-    with open(file_path, "rb") as f:
-        resp = requests.post(
-            "https://file.io",
-            files={"file": f},
-            data={"expires": "14d"},
-            timeout=120,
-        )
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get("success"):
-        raise RuntimeError(f"file.io upload failed: {data}")
-    return data["link"]
+def _upload_video(file_path: Path) -> str:
+    """מעלה סרטון ל-Cloudinary ומחזיר URL ציבורי."""
+    cloudinary.config(
+        cloud_name=os.environ["CLOUDINARY_CLOUD_NAME"],
+        api_key=os.environ["CLOUDINARY_API_KEY"],
+        api_secret=os.environ["CLOUDINARY_API_SECRET"],
+    )
+    result = cloudinary.uploader.upload(
+        str(file_path),
+        resource_type="video",
+        folder="bowling_bot",
+    )
+    return result["secure_url"]
 
 
 def process_video(video_url: str) -> str:
@@ -79,7 +80,7 @@ def process_video(video_url: str) -> str:
             timeout=120,
         )
 
-        public_url = _upload_to_fileio(output_path)
+        public_url = _upload_video(output_path)
         return public_url
 
     finally:
